@@ -36,16 +36,13 @@ logger.addHandler(handler)
 def check_tokens():
     """Проверяет доступность переменных окружения."""
     variables = (PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
-    if all(variables):
-        logger.info('Все переменные окружения найдены')
-    else:
-        logger.critical('Не все переменные окружения найдены')
-        raise SystemExit
+    return all(variables)
 
 
 def send_message(bot, message):
     """Отправляет сообщение в Telegram-чат."""
     try:
+        logger.info(f'Попытка отправки сообщения: {message}')
         bot.send_message(
             chat_id=TELEGRAM_CHAT_ID,
             text=f'{message}'
@@ -63,11 +60,12 @@ def get_api_answer(timestamp):
     payload = {'from_date': timestamp}
     try:
         response = requests.get(ENDPOINT, headers=HEADERS, params=payload)
+        if response.status_code != HTTPStatus.OK:
+            raise Exception(f'Получен код ответа {response.status_code}')
+        response = response.json()
     except requests.RequestException as error:
         logger.error(f'Ошибка запроса к экдпоинту: {error}')
-    if response.status_code != HTTPStatus.OK:
-        raise Exception(f'Получен код ответа {response.status_code}')
-    return response.json()
+    return response
 
 
 def check_response(response):
@@ -93,8 +91,7 @@ def parse_status(homework):
     if homework_status in HOMEWORK_VERDICTS:
         verdict = HOMEWORK_VERDICTS[homework_status]
         return f'Изменился статус проверки работы "{homework_name}". {verdict}'
-    else:
-        raise Exception('Недокументированный статус')
+    raise Exception('Недокументированный статус')
 
 
 def get_current_date(response):
@@ -104,23 +101,28 @@ def get_current_date(response):
 
 def main():
     """Основная логика работы бота."""
-    check_tokens()
+    if check_tokens():
+        logger.info('Все переменные окружения найдены')
+    else:
+        logger.critical('Не все переменные окружения найдены')
+        raise SystemExit
     bot = TeleBot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
-
+    last_message = None
+    message = None
     while True:
         try:
             answer = get_api_answer(timestamp)
             timestamp = get_current_date(answer)
             check = check_response(answer)
-            if check is not None:
-                status = parse_status(check)
-                send_message(bot, status)
-
+            if check:
+                message = parse_status(check)
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
             logger.error(message)
+        if message and last_message != message:
             send_message(bot, message)
+            last_message = message
         time.sleep(RETRY_PERIOD)
 
 
